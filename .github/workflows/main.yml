@@ -39,11 +39,6 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Main
-        uses: actions/checkout@v4.1.1
-        with:
-          path: main
-          # submodules: recursive
 
       - name: Hide sensitive inputs
         uses: levibostian/action-hide-sensitive-inputs@v1
@@ -119,5 +114,7 @@ jobs:
           draft: true
 
       - name: Output Release URL
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
-          echo "::notice::Release available at: https://github.com/${{ github.repository }}/releases"
+          echo "::notice::Release available at: ${REPO_URL}/releases" 
