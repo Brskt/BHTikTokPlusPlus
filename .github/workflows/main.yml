@@ -1,0 +1,123 @@
+name: Create TikTok Plus app
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_url:
+        description: "URL to the decrypted TikTok IPA file"
+        default: ""
+        required: true
+        type: string
+
+      tweak_version:
+        description: "BHTikTok++ Version"
+        default: "1.9.3"
+        required: true
+        type: string
+
+      display_name:
+        description: "App Name (Optional)"
+        default: "TikTok"
+        required: true
+        type: string
+
+      bundle_id:
+        description: "BundleID (Optional)"
+        default: "com.zhiliaoapp.musically"
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build TikTok Plus
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Main
+        uses: actions/checkout@v4.1.1
+        with:
+          path: main
+          submodules: recursive
+
+      - name: Hide sensitive inputs
+        uses: levibostian/action-hide-sensitive-inputs@v1
+
+      - name: Validate IPA URL
+        run: |
+          curl -L -r 0-1023 -o sample.part "${{ inputs.ipa_url }}" > /dev/null 2>&1
+          file_type=$(file --mime-type -b sample.part)
+
+          if [[ "$file_type" != "application/x-ios-app" && "$file_type" != "application/zip" ]]; then
+            echo "::error::Validation failed: The file is not a valid IPA file. Detected type: $file_type."
+            exit 1
+          fi
+
+      - name: Install Dependencies
+        run: brew install make ldid
+
+      - name: Set PATH environment variable
+        run: echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+
+      - name: Cache Theos
+        id: theos
+        uses: actions/cache@v4
+        env:
+          cache-name: theos_cache_67db2ab
+        with:
+          path: theos/
+          key: ${{ env.cache-name }}
+          restore-keys: ${{ env.cache-name }}
+
+      - name: Setup Theos
+        if: steps.theos.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4.1.7
+        with:
+          repository: theos/theos
+          ref: 67db2ab8d950910161730de77c322658ea3e6b44
+          path: ${{ github.workspace }}/theos
+          submodules: recursive
+
+      - name: Download iOS SDK
+        if: steps.theos.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
+          cd sdks
+          git sparse-checkout set --no-cone iPhoneOS16.5.sdk
+          git checkout
+          mv *.sdk $THEOS/sdks
+        env:
+          THEOS: ${{ github.workspace }}/theos
+
+      - name: Install cyan
+        run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
+
+      - name: Download BHTikTok++
+        id: download_bhtiktok
+        run: |
+          deb_url="https://github.com/raulsaeed/BHTikTokPlusPlus/releases/download/v${{ inputs.tweak_version }}/com.raulsaeed.bhtiktok++_${{ inputs.tweak_version }}_iphoneos-arm64.deb"
+          wget "$deb_url" --no-verbose -O ${{ github.workspace }}/bhtiktok.deb
+
+      - name: Download TikTok IPA
+        id: download_tiktok
+        run: wget "${{ inputs.ipa_url }}" --no-verbose -O ${{ github.workspace }}/tiktok.ipa
+
+      - name: Inject BHTikTok++ into IPA
+        run: |
+          cyan -i tiktok.ipa -o TikTokPlus_${{ inputs.tweak_version }}.ipa -uwef bhtiktok.deb -n "${{ inputs.display_name }}" -b ${{ inputs.bundle_id }}
+
+      - name: Upload to GitHub Releases
+        uses: softprops/action-gh-release@v2.0.1
+        with:
+          name: TikTokPlus v${{ inputs.tweak_version }} (${{ github.run_number }})
+          files: TikTokPlus_${{ inputs.tweak_version }}.ipa
+          draft: true
+
+      - name: Output Release URL
+        run: |
+          echo "::notice::Release available at: https://github.com/${{ github.repository }}/releases"
